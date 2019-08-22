@@ -1,2 +1,8 @@
 # init
-Initializes a repository
+
+Initializes a repository.
+
+## Dependencies
+
+- PowerShell Core
+- Node.js
