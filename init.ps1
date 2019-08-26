@@ -11,6 +11,7 @@ class ThreadInfo {
 	# Class properties
 	$ProgressActivity = "General processing"
 	[Int]$ProgressId
+	[PowerShell]$PowerShell
 
 	# Constructor for when only Id is provided
 	ThreadInfo([Int]$ProgressId) {
@@ -19,28 +20,27 @@ class ThreadInfo {
 
 	# Constructor for when all the data is provided
 	ThreadInfo([Int]$ProgressId, [String]$ProgressActivity) {
-		$this.Id = $ProgressId
+		$this.ProgressId = $ProgressId
 		$this.ProgressActivity = $ProgressActivity
 	}
 }
 
 # Array holding thread information
 $ThreadCounter = 0
-[ThreadInfo[]]$ThreadInfoArray = [ThreadInfo]::new($ThreadCounter++, "YAML Parser")
+[ThreadInfo[]]$ThreadInfoArray = @([ThreadInfo]::new($ThreadCounter++, "YAML Parser"))
 
 # Prepare runspaces; Supplied with min and max instances count
-$MainRunspacePool = [RunspaceFactory]::CreateRunspacePool($ThreadInfoArray.length, $ThreadInfoArray.length)
+$RunspacePool = [RunspaceFactory]::CreateRunspacePool($ThreadInfoArray.length, $ThreadInfoArray.length)
 
-# Arrays holding thread abstraction
-
-[PowerShell[]]$PowerShellArray
+# Open main pool
+$RunspacePool.Open()
 
 $ThreadInfoArray | ForEach-Object -Process {
 	# Add a powershell instance to array
 	$PowerShell = [PowerShell]::Create()
 
 	# Associate PS instance with pool
-	$PowerShell.RunspacePool = $MainRunspacePool
+	$PowerShell.RunspacePool = $RunspacePool
 
 	# Add script to PS
 	$PowerShell.AddScript(
@@ -52,11 +52,8 @@ $ThreadInfoArray | ForEach-Object -Process {
 			)
 		}
 	)
-	$PowerShell.AddParameters($_)
+	$PowerShell.AddParameters( @{ ThreadInfo = $_ })
 }
-
-# Open main pool
-$MainRunspacePool.Open()
 
 # Installs yaml parser in current directory
 function InstallYAMLParserInCurrentDirectory {
