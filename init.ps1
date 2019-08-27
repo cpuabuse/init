@@ -2,16 +2,17 @@
 Takes in "origanization" and "repository" YAML files. #>
 
 # Set global variables
-$ExecutionDirectory = (Get-Location).Path
-$ScriptDirectory = $PSScriptRoot
+[String]$ExecutionDirectory = (Get-Location).Path
+[String]$ScriptDirectory = $PSScriptRoot
 
 <# Contains information for threads to be created.
 ThreadInfo and Thread are separate due to the need to know the length of array during Thread initialization. #>
 class ThreadInfo {
 	# Class properties
-	$ProgressActivity = "General processing"
+	[String]$ProgressActivity = "General processing"
 	[Int]$ProgressId
 	[PowerShell]$PowerShell
+	[System.Collections.Queue]$ProgressQueue
 
 	# Constructor for when only Id is provided
 	ThreadInfo([Int]$ProgressId) {
@@ -29,10 +30,18 @@ class ThreadInfo {
 $ThreadCounter = 0
 [ThreadInfo[]]$ThreadInfoArray = @([ThreadInfo]::new($ThreadCounter++, "YAML Parser"))
 
-# Prepare runspaces; Supplied with min and max instances count
+# Create initiale session state
+[System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault() 
+
+# Create synchronized progress queue
+$ProgressQueue = [System.Collections.Queue]::Synchronized(
+	(New-Object System.Collections.Queue)
+)
+
+# Initialize pool
 $RunspacePool = [RunspaceFactory]::CreateRunspacePool($ThreadInfoArray.length, $ThreadInfoArray.length)
 
-# Open main pool
+# Open pool
 $RunspacePool.Open()
 
 $ThreadInfoArray | ForEach-Object -Process {
@@ -48,11 +57,17 @@ $ThreadInfoArray | ForEach-Object -Process {
 		{
 			# Declare params
 			Param (
-				[ThreadInfo]$ThreadInfo
+				[ThreadInfo]$ThreadInfo,
+				[System.Collections.Queue]$ProgressQueue
 			)
 		}
 	)
-	$PowerShell.AddParameters( @{ ThreadInfo = $_ })
+	$PowerShell.AddParameters(
+		@{
+			ThreadInfo    = $_
+			ProgressQueue = $ProgressQueue
+		}
+	)
 }
 
 # Installs yaml parser in current directory
