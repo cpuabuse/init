@@ -1,73 +1,184 @@
-<# Script for initializing a TypeScript repository. Written for Powershell Core 6.2.
-Takes in "origanization" and "repository" YAML files. #>
+<## Must be run as a script file.
+Script for initializing a TypeScript repository. Written for Powershell Core 6.2.
+Takes in "origanization" and "repository" YAML files. ##>
+
+using namespace System # To access IAsyncResult
+using namespace System.Collections # To access Queue
+using namespace System.Management.Automation.Runspaces # To access InitialSessionState, RunspacePool
 
 # Set global variables
-[String]$ExecutionDirectory = (Get-Location).Path
-[String]$ScriptDirectory = $PSScriptRoot
+[String]$script:ExecutionDirectory = (Get-Location).Path
+[String]$script:ScriptDirectory = $PSScriptRoot
+[InitialSessionState]$script:InitialSessionState = [InitialSessionState]::CreateDefault() # Create initiale session state
 
-<# Contains information for threads to be created.
-ThreadInfo and Thread are separate due to the need to know the length of array during Thread initialization. #>
-class ThreadInfo {
+<## Contains information about threads. ##>
+class Thread {
 	# Class properties
-	[String]$ProgressActivity = "General processing"
-	[Int]$ProgressId
-	[PowerShell]$PowerShell
-	[System.Collections.Queue]$ProgressQueue
+	[ScriptBlock]$Function # `[ScriptBlock].isValueType` is `False`, thus it is OK to store it here, and it should not take space
+	[Int]$Id # Numeric ID, representing the index of this thread within the thread pool
+	[PowerShell]$PowerShell # Actually where execution will take place
+	[String]$ProgressOperation # The operation to report with Progress
+	[ThreadPool]$ThreadPool # The associated thread pool
+	[IAsyncResult]$AsyncResult # Holds async data for running thread
 
-	# Constructor for when only Id is provided
-	ThreadInfo([Int]$ProgressId) {
-		$this.Id = $ProgressId
+	# Constructs the bare minimum for the thread to be ready to be initialized
+	Thread([ScriptBlock]$Function, [String]$ProgressOperation) {
+		# Set class members
+		$this.Function = $Function
+		$this.CurrentOperation = $ProgressOperation
 	}
 
-	# Constructor for when all the data is provided
-	ThreadInfo([Int]$ProgressId, [String]$ProgressActivity) {
-		$this.ProgressId = $ProgressId
-		$this.ProgressActivity = $ProgressActivity
+	<## Initializes the thread from the thread pool.
+
+	** Lifecycle **
+
+	1. New
+	2. Initialzie
+	3. Start
+	4. Wait
+	5. Remove
+
+	** Thread signature **
+	
+	```powershell
+	function MyFunction([Thread]$Thread){
+		# Function body
+	}
+	```
+
+	** About arguments**
+
+	Varibable | Value type
+	--- | ---
+	[System.Collections.Queue].isValueType | False
+	[ThreadPool].isValueType | False ##>
+	[Void]Initialize([Int]$Id, [ThreadPool]$ThreadPool) {
+		# Set ID
+		$this.Id = $Id
+
+		# Set thread pool
+		$this.ThreadPool = $ThreadPool
+
+		# Add a powershell instance
+		$this.PowerShell = [PowerShell]::Create()
+
+		# Associate PS instance with pool
+		$this.PowerShell.RunspacePool = $ThreadPool.RunspacePool
+
+		# Add script to PS
+		$this.PowerShell.AddScript(
+			# Script body
+			{
+				# Declare params
+				Param (
+					[Thread]$Thread
+				)
+
+				Invoke-Command $this.Function -ArgumentList $Thread
+			}
+		)
+		$this.PowerShell.AddParameters(
+			@{
+				Thread = $this
+			}
+		)
+	}
+
+	<## Begins the execution of the thread. ##>
+	[Void]Start() {
+		$this.AsyncResult = $this.PowerShell.BeginInvoke()
+	}
+
+	<## Cleans up. ##>
+	[Void]Remove() {
+		$this.PowerShell.Dispose()
+	}
+
+	<## Waits for the operation to complete. ##>
+	[Void]Wait() {
+		# End invocation
+		$this.PowerShell.EndInvoke($this.AsyncResult)
 	}
 }
 
-# Array holding thread information
-$ThreadCounter = 0
-[ThreadInfo[]]$ThreadInfoArray = @([ThreadInfo]::new($ThreadCounter++, "YAML Parser"))
+<## Contains information about the thread pool.
 
-# Create initiale session state
-[System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault() 
+** Lifecycle **
 
-# Create synchronized progress queue
-$ProgressQueue = [System.Collections.Queue]::Synchronized(
-	(New-Object System.Collections.Queue)
-)
+1. New
+2. Start
+3. Wait
+4. Remove ##>
+class ThreadPool {
+	# Class properties
+	[Thread[]]$ThreadArray # Array of threads
+	[String]$ProgressActivity = "General processing"
+	[Queue]$ProgressQueue # A queue to store progress reporting
+	[RunspacePool]$RunspacePool
 
-# Initialize pool
-$RunspacePool = [RunspaceFactory]::CreateRunspacePool($ThreadInfoArray.length, $ThreadInfoArray.length)
+	# Primary constructor
+	ThreadPool([Thread[]]$ThreadArray) {
+		# Determine thread array length
+		$ThreadArrayLength = $ThreadArray.length
 
-# Open pool
-$RunspacePool.Open()
+		# Create synchronized progress queue
+		$this.ProgressQueue = [Queue]::Synchronized(
+			(New-Object System.Collections.Queue)
+		)
 
-$ThreadInfoArray | ForEach-Object -Process {
-	# Add a powershell instance to array
-	$PowerShell = [PowerShell]::Create()
+		# Initialize & open pool
+		$this.RunspacePool = [RunspaceFactory]::CreateRunspacePool($ThreadArrayLength, $ThreadArrayLength, $script:InitialSessionState <# Accessing script scope, since cannot use global scope vars directly from class methods. #>)
+		$this.RunspacePool.Open()
 
-	# Associate PS instance with pool
-	$PowerShell.RunspacePool = $RunspacePool
+		# Initialize thread array
+		$this.ThreadArray = $ThreadArray
 
-	# Add script to PS
-	$PowerShell.AddScript(
-		# Script body
-		{
-			# Declare params
-			Param (
-				[ThreadInfo]$ThreadInfo,
-				[System.Collections.Queue]$ProgressQueue
-			)
+		# Initialize threads
+		for (
+			$i = 0
+			$i -lt $ThreadArrayLength
+			$i++
+		) {
+			$_.Initialize($i, $this)
 		}
-	)
-	$PowerShell.AddParameters(
-		@{
-			ThreadInfo    = $_
-			ProgressQueue = $ProgressQueue
+	}
+
+	<## Constructor, with custom progress activity name. ##>
+	ThreadPool([String]$ProgressActivity, [Thread[]]$ThreadArray) {
+		# Set the activity
+		$this.$ProgressActivity = $ProgressActivity
+
+		# Call primary constructor
+		$this.ThreadPool($ThreadArray)
+	}
+
+	<## Cleans up. ##>
+	[Void]Remove() {
+		# Clean up threads first
+		$this.ThreadArray | ForEach-Object -Process {
+			$_.Remove()
 		}
-	)
+
+		# Deal with the pool
+		$this.RunspacePool.Close() 
+		$this.RunspacePool.Dispose()
+	}
+
+	<## Execute threads. ##>
+	[Void]Start() {
+		# Iterate through threads
+		$this.ThreadArray | ForEach-Object -Process {
+			$_.Start()
+		}
+	}
+
+	<## Waits for all the threads to complete. ##>
+	[Void]Wait() {
+		# Iterate through threads
+		$this.ThreadArray | ForEach-Object -Process {
+			$_.Wait()
+		}
+	}
 }
 
 # Installs yaml parser in current directory
@@ -108,8 +219,6 @@ function InitializeNPM {
 
 	npm init
 }
-
-
 
 # Set location to script
 Set-Location -Path $ScriptDirectory
