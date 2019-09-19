@@ -25,7 +25,7 @@ class Thread {
 	Thread([ScriptBlock]$Function, [String]$ProgressOperation) {
 		# Set class members
 		$this.Function = $Function
-		$this.CurrentOperation = $ProgressOperation
+		$this.ProgressOperation = $ProgressOperation
 	}
 
 	<## Initializes the thread from the thread pool.
@@ -118,8 +118,11 @@ class ThreadPool {
 
 	# Primary constructor
 	ThreadPool([Thread[]]$ThreadArray) {
+		# Initialize thread array
+		$this.ThreadArray = $ThreadArray
+
 		# Determine thread array length
-		$ThreadArrayLength = $ThreadArray.length
+		$ThreadArrayLength = $this.ThreadArray.length
 
 		# Create synchronized progress queue
 		$this.ProgressQueue = [Queue]::Synchronized(
@@ -127,11 +130,10 @@ class ThreadPool {
 		)
 
 		# Initialize & open pool
-		$this.RunspacePool = [RunspaceFactory]::CreateRunspacePool($ThreadArrayLength, $ThreadArrayLength, $script:InitialSessionState <# Accessing script scope, since cannot use global scope vars directly from class methods. #>)
+		$this.RunspacePool = [RunspaceFactory]::CreateRunspacePool($script:InitialSessionState <# Accessing script scope, since cannot use global scope vars directly from class methods. #>)
+		$this.RunspacePool.SetMinRunspaces($ThreadArrayLength)
+		$this.RunspacePool.SetMaxRunspaces($ThreadArrayLength)
 		$this.RunspacePool.Open()
-
-		# Initialize thread array
-		$this.ThreadArray = $ThreadArray
 
 		# Initialize threads
 		for (
@@ -139,7 +141,7 @@ class ThreadPool {
 			$i -lt $ThreadArrayLength
 			$i++
 		) {
-			$_.Initialize($i, $this)
+			$this.ThreadArray[$i].Initialize($i, $this)
 		}
 	}
 
@@ -224,7 +226,9 @@ function InitializeNPM {
 Set-Location -Path $ScriptDirectory
 
 # Install YAML parser if necessary
-InstallYAMLParserInCurrentDirectory
+$ThreadPool = [ThreadPool]::new(@([Thread]::new(${function:InstallYAMLParserInCurrentDirectory}, "test")))
+$ThreadPool.Start()
+$ThreadPool.Wait()
 
 # Set location to original
 Set-Location -Path $ExecutionDirectory
