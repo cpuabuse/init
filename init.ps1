@@ -71,10 +71,10 @@ class Thread {
 			{
 				# Declare params
 				Param (
-					[Thread]$Thread
+					$Thread # Class type is not specified on purpose https://github.com/PowerShell/PowerShell/issues/3641
 				)
 
-				Invoke-Command $this.Function -ArgumentList $Thread
+				Invoke-Command -ScriptBlock $Thread.Function -ArgumentList $Thread
 			}
 		)
 		$this.PowerShell.AddParameters(
@@ -185,6 +185,8 @@ class ThreadPool {
 
 # Installs yaml parser in current directory
 function InstallYAMLParserInCurrentDirectory {
+	"test" > test.txt
+	
 	Write-Progress -Activity "Determining if YAML parser is installed..." -CurrentOperation current_op -Status curr_status -PercentComplete 20 -Id 1
 
 	# Set flag that YAML parser already installed
@@ -202,7 +204,7 @@ function InstallYAMLParserInCurrentDirectory {
 
 	# Install parser, if doesn't exist
 	if (!$exists) {
-		npm install js-yaml --no-save 2> Out-Null
+		npm install js-yaml --no-save
 	}
 }
 
@@ -226,7 +228,7 @@ function InitializeNPM {
 Set-Location -Path $ScriptDirectory
 
 # Install YAML parser if necessary
-$ThreadPool = [ThreadPool]::new(@([Thread]::new(${function:InstallYAMLParserInCurrentDirectory}, "test")))
+$ThreadPool = [ThreadPool]::new(@([Thread]::new($function:InstallYAMLParserInCurrentDirectory, "test")))
 $ThreadPool.Start()
 $ThreadPool.Wait()
 
