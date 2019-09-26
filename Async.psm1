@@ -20,7 +20,7 @@ class Thread {
 	[String]$ProgressOperation = "General operation"
 	[Int]$ProgressPercent = 0
 	[Int]$ProgressSeconds = -1 # Seconds remaining, "-1" stands for undefined
-	[String]$ProgressStatus = $null # We do not want the default status to display anything
+	[String]$ProgressStatus = "Initializing" # We do not want the default status to display anything
 	[ThreadPool]$ThreadPool # The associated thread pool
 	[IAsyncResult]$AsyncResult # Holds async data for running thread
 
@@ -49,7 +49,7 @@ class Thread {
 		ProgressOperation = "General operation"
 		ProgressPercent   = 0
 		SecondsRemaining  = -1
-		ProgressStatus    = $null
+		ProgressStatus    = Processing
 	} ##>
 
 	[Void]EnqueueProgress([Hashtable]$ProgressInfo) {
@@ -97,7 +97,7 @@ class Thread {
 		# Add script to PS
 		$this.PowerShell.AddScript(
 			# Script body
-			{
+			{ 
 				# Declare params
 				Param (
 					$Thread # Class type is not specified on purpose https://github.com/PowerShell/PowerShell/issues/3641
@@ -224,7 +224,7 @@ class ThreadPool {
 		}
 
 		# Process the status
-		$Thread.ProgressStatus = $null
+		$Thread.ProgressStatus = "Processing"
 		if ($hash.Status -is [String]) {
 			$Thread.ProgressStatus = $hash.Status
 		}
@@ -257,6 +257,30 @@ class ThreadPool {
 		}
 	}
 
+	<# Ends all the progress bars. #>
+	[Void]StopProgress() {
+		# Actually write from the current registered thread state
+		$this.ThreadArray | ForEach-Object -Process {
+			Write-Progress -Activity $this.ProgressActivity `
+				-CurrentOperation $_.ProgressOperation `
+				-Status Finalizing `
+				-PercentComplete 100 `
+				-ParentId $this.Id `
+				-Id $this.Id $_.ThreadId `
+				-SecondsRemaining 0 `
+				-Completed
+		}
+
+		# Write pool's progress first
+		Write-Progress -Activity $this.ProgressActivity `
+			-CurrentOperation $this.ProgressOperation `
+			-Status Finalizing `
+			-PercentComplete 100 `
+			-Id $this.Id `
+			-SecondsRemaining 0 `
+			-Completed
+	}
+
 	<# Updates the progress to the console. #>
 	[Void]UpdateProgress() {
 		# Write pool's progress first
@@ -269,7 +293,7 @@ class ThreadPool {
 
 		# Actually write from the current registered thread state
 		$this.ThreadArray | ForEach-Object -Process {
-			Write-Progress -Activity $this.ProgressActivity `
+			Write-Progress -Activity $_.ProgressActivity `
 				-CurrentOperation $_.ProgressOperation `
 				-Status $_.ProgressOperation `
 				-PercentComplete $_.ProgressPercent `
@@ -306,9 +330,7 @@ class ThreadPool {
 		# Finally wait for all
 		$this.Wait()
 
-		# Update all the threads to display end progress
-
 		# Finally close all the progresses
-		$this.UpdateProgress()
+		$this.StopProgress()
 	}
 }
