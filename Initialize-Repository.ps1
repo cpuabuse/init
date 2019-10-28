@@ -3,7 +3,7 @@ Script for initializing a TypeScript repository. Written for Powershell Core 6.2
 Takes in "origanization" and "repository" YAML files. ##>
 
 # Set Requires
-#Requires -Version 6.2
+#Requires -Version 6.0
 # Requires -Modules Async
 
 # Use modules
