@@ -3,24 +3,26 @@
 	cpuabuse.com
 #>
 
-<##
- # Async implemented via runspaces.
- #
- # **Lifecycle notation**
- #
- # `{{ Stage }}` to be substituted with the stage name.
- #
- # Symbol | Meaning
- # --- | ---
- # `...{{ Stage }}` | Repeatable
- # `[{{ Stage }}]` | Optional
- #
- # **Note**
- #
- # - Can be run copy-pasted into console multiple times and used successfully as well.
- # - Can be imported via both `using module` ad `Import-module`.
- #     For `Import-module` can only use the helper functions, instead of directly manipulating classes.
- #>
+<#
+	.SYNOPSIS
+		Async library module implemented via runspaces.
+
+	.DESCRIPTION
+		**Lifecycle notation**
+
+		`{{ Stage }}` to be substituted with the stage name.
+
+		Symbol | Meaning
+		--- | ---
+		`...{{ Stage }}` | Repeatable
+		`[{{ Stage }}]` | Optional
+
+
+	.NOTES
+		- Can be run copy-pasted into console multiple times and used successfully as well.
+		- Can be imported via both `using module` ad `Import-module`.
+			For `Import-module` can only use the helper functions, instead of directly manipulating classes.
+#>
 
 # Set Requires
 #Requires -Version 6.0
@@ -30,17 +32,31 @@ using namespace System # To access IAsyncResult
 using namespace System.Collections # To access Queue
 using namespace System.Management.Automation.Runspaces # To access InitialSessionState, RunspacePool
 
-<#
- # Represents the lifecycle of classes used in this module.
- #
- # The lifecycle allows the objects to be aware of their states, and gracefully process lifecycle related errors.
- #>
 enum Lifecycle {
+	<#
+		.SYNOPSIS
+			Represents the lifecycle of classes used in this module.
+
+		.DESCRIPTION
+			The lifecycle allows the objects to be aware of their states, and gracefully process lifecycle related errors.
+	#>
+
+	# Created
 	New = 0x1
+
+	# Started
 	Start = 0x1 -shl 1
+
+	# Updated 
 	Update = 0x1 -shl 2
+
+	# Processing completed
 	Wait = 0x1 -shl 3
+
+	# Stopped
 	Stop = 0x1 -shl 4
+
+	# Removed
 	Remove = 0x1 -shl 5
 }
 
@@ -207,36 +223,57 @@ if ($null -eq (Get-Variable -Name "AsyncVariableGuard" -Scope "Script" -ErrorAct
 		-Scope "Script"
 }
 
-<##
- # Class representing a progress, a way to interact with it logically, translate to physical representation, and write progress to console.
- #
- # The string members of the class have `ValidateNotNullOrEmpty()` validator present, but the end-user should not have restrictions like that, so it is a class implementation's responsibility to perform null/empty checks.
- #
- # **Lifecycle**
- #
- # 1. New
- # 2. ...Call `UpdateProgress`
- # 3. Call `StopProgress`
- #>
 class Progress {
-	hidden [ValidateNotNullOrEmpty()][String]$ProgressActivity = $script:ProgressActivityInitial # The activity to report with Progress
-	[ValidateNotNullOrEmpty()][String]$ProgressCurrentOperation = $script:ProgressCurrentOperationInitial # Operation name
-	hidden [Int32]$ProgressId # Operation Id
-	hidden [Lifecycle]$ProgressLifecycle # Lifecycle of the progress
-	[ValidateRange(0, 100)][Int32]$ProgressPercentComplete = $script:ProgressPercentCompleteInitial # Percent complete
-	[Int32]$ProgressSecondsRemaining = $script:ProgressSecondsRemainingInitial # Seconds remaining
-	[ValidateNotNullOrEmpty()][String]$ProgressStatus = $script:ProgressStatusInitial # Operation status
-	hidden [Boolean]$ProgressCompleted = $False # Not-completed initially
+	<#
+		.SYNOPSIS
+			Class representing a progress, a way to interact with it logically, translate to physical representation, and write progress to console.
 
-	<##
-	 # Constructor, setting Id and activity.
-	 #>
+		.DESCRIPTION
+			The string members of the class have `ValidateNotNullOrEmpty()` validator present, but the end-user should not have restrictions like that, so it is a class implementation's responsibility to perform null/empty checks.
+
+			**Lifecycle**
+
+			1. New
+			2. ...Call `UpdateProgress`
+			3. Call `StopProgress`
+	#>
+
+	# The activity to report with Progress
+	hidden [ValidateNotNullOrEmpty()][String]$ProgressActivity = $script:ProgressActivityInitial
+	
+	# Operation name
+	[ValidateNotNullOrEmpty()][String]$ProgressCurrentOperation = $script:ProgressCurrentOperationInitial
+	
+	# Operation Id
+	hidden [Int32]$ProgressId
+
+	# Lifecycle of the progress
+	hidden [Lifecycle]$ProgressLifecycle
+
+	# Percent complete
+	[ValidateRange(0, 100)][Int32]$ProgressPercentComplete = $script:ProgressPercentCompleteInitial
+
+	# Seconds remaining
+	[Int32]$ProgressSecondsRemaining = $script:ProgressSecondsRemainingInitial
+
+	# Operation status
+	[ValidateNotNullOrEmpty()][String]$ProgressStatus = $script:ProgressStatusInitial
+
+	# Not-completed initially
+	hidden [Boolean]$ProgressCompleted = $False
+
 	Progress(
-		<## Progress Id to set. #>
+		# Progress Id to set
 		[Int32]$ProgressId,
-		<## Activity string. #>
+
+		# Activity string
 		[String]$ProgressActivity
 	) {
+		<#
+			.SYNOPSIS
+				Constructor, setting Id and activity.
+	 	#>
+
 		# Set activity
 		$this.ProgressActivity = $ProgressActivity
 
@@ -247,8 +284,12 @@ class Progress {
 		$this.ProgressLifecycle = $script:LifecycleNew 
 	}
 
-	<## Set progress state to stopped. #>
 	StopProgress() {
+		<#
+			.SYNOPSIS
+				Set progress state to stopped.
+		#>
+	
 		# Only `New` or `Update` stage
 		if ($script:LifecycleNew -bor $script:LifecycleUpdate -band $this.ProgressLifecycle -eq $this.ProgressLifecycle) {
 			# Set the percentage
@@ -269,10 +310,18 @@ class Progress {
 		
 	}
 
-	<## Report the progress. #>
 	UpdateProgress() {
-		# Functional code, separated for ensuring clear lifecycle
+		<#
+			.SYNOPSIS
+				Report the progress.
+		#>
+
 		function UpdateProgressDo {
+			<#
+				.SYNOPSIS
+					Functional code, separated for ensuring clear lifecycle
+			#>
+
 			# Actually write from the current registered thread state
 			Write-Progress -Activity $this.ProgressActivity `
 				-CurrentOperation $this.ProgressOperation `
@@ -315,27 +364,41 @@ class Progress {
 	}
 }
 
-<##
- # Class implementing the metadata of thread like objects.
- #
- # `ThreadLike` takes the arguments as is, and does not perform any checks.
- #
- # **Lifecycle**
- #
- # 1. New
- # 2. Call `StartThreadLike`
- # 3. [Update]
- #     ...Reassign `Progress` Members
- #     ...Call `UpdateThreadLike`
- # 5. Call `StopThreadLike`
- #>
-class ThreadLike : Progress {
-	[UInt16]$ThreadId # Numeric ID, identifying the thread like object
-	[Lifecycle]$ThreadLikeLifecycle # Lifecycle of the threadlike
-	[Boolean]$ProgressEnabled # Is the `Progress` base class even to be used
 
-	# Constructor setting thread-like metadata
+class ThreadLike : Progress {
+	<#
+		.SYNOPSIS
+			Class implementing the metadata of thread like objects.
+
+		.DESCRIPTION
+			**Lifecycle**
+
+			1. New
+			2. Call `StartThreadLike`
+			3. [Update]
+					...Reassign `Progress` Members
+					...Call `UpdateThreadLike`
+			5. Call `StopThreadLike`
+
+		.INPUTS
+		`ThreadLike` takes the arguments as is, and does not perform any checks.
+	#>
+
+	# Numeric ID, identifying the thread like object
+	[UInt16]$ThreadId
+
+	# Lifecycle of the threadlike
+	[Lifecycle]$ThreadLikeLifecycle
+	
+	# Is the `Progress` base class even to be used
+	[Boolean]$ProgressEnabled
+
 	ThreadLike([UInt]$ThreadId, [Int32]$ProgressId, [String]$ProgressActivity, [Boolean]$ProgressEnabled) {
+		<#
+			.SYNOPSIS
+				Constructor setting thread-like metadata
+		#>
+
 		# Call superconstructor
 		$this.Progress($ProgressId, $ProgressActivity)
 
@@ -349,8 +412,12 @@ class ThreadLike : Progress {
 		$this:ThreadLikeLifecycle = $script:LifecycleNew
 	}
 
-	<## Stops the state of a `ThreadLike`. #>
 	[Void]StopThreadLike() {
+		<#
+				.SYNOPSIS
+					Stops the state of a `ThreadLike`.
+			#>
+
 		# Only if `Update` or `New` stage
 		if ($script:LifecycleNew -bor $script:LifecycleUpdate -band $this.ThreadLikeLifecycle -eq $this.ThreadLikeLifecycle) {
 			# Stop the Progress
@@ -363,27 +430,30 @@ class ThreadLike : Progress {
 		}
 	}
 
-	<## A wrapper to perform the actual call to the update progress. #>
-	[Void]UpdateProgressAsThreadLike() {
+	hidden [Void]UpdateProgressAsThreadLike() {
+		<#
+				.SYNOPSIS
+					A wrapper to perform the actual call to the update progress.
+			#>
+
 		# Update the Progress
 		if ($this.ProgressEnabled) {
-			$this.UpdateProgress();
+			$this.UpdateProgress()
 		}
 	}
 
-	<## Updates the state of a `ThreadLike`. #>
 	[Void]UpdateThreadLike() {
-		# Functional processing
-		function UpdateThreadLikeDo {
-			
-		}
+		<#
+				.SYNOPSIS
+					Updates the state of a `ThreadLike`.
+			#>
 
 		# Switch on lifecycle - optimized for update stage
 		switch ($this.ThreadLikeLifecycle) {
 			# Case update
 			$script:LifecycleUpdate {
 				# Actual update functionality
-				UpdateThreadLikeDo
+				$this.UpdateProgressAsThreadLike()
 
 				# Break
 				break
@@ -408,14 +478,16 @@ class ThreadLike : Progress {
 		}
 	}
 
-	<## Starts the `ThreadLike`. #>
 	[Void]StartThreadLike() {
+		<#
+				.SYNOPSIS
+					Starts the `ThreadLike`.
+			#>
+
 		# Switch by lifecycle state
 		if ($script:LifecycleNew -band $this.ProgressLifecycle -eq $this.ProgressLifecycle) {
 			# Update the Progress
-			if ($this.ProgressEnabled) {
-				$this.UpdateProgress();
-			}
+			$this.UpdateProgressAsThreadLike()
 		}
 		else {
 			throw $script:ErrorThreadLikeForbiddenMethod
@@ -426,31 +498,35 @@ class ThreadLike : Progress {
 <##
  # Contains information about threads.
  #
- # ** Lifecycle **
+ # **Lifecycle**
  #
  # 1. New
  # 3. Start
  # 4. Wait
  # 5. Remove
+ #
+ # **Note**
+ #
+ # Does not perform argument checks.
  #>
 class Thread : ThreadLike {
 	# Class properties
-	[IAsyncResult]$AsyncResult # Holds async data for running thread
-	[ScriptBlock]$Function # `[ScriptBlock].isValueType` is `False`, thus it is OK to store it here, and it should not take space
-	[PowerShell]$PowerShell # Actually where execution will take place
-	[ThreadPool]$ThreadPool # The associated thread pool; `[ThreadPool].isValueType` is `False`
-	
+	hidden [IAsyncResult]$AsyncResult # Holds async data for running thread
+	hidden [ScriptBlock]$Function # `[ScriptBlock].isValueType` is `False`, thus it is OK to store it here, and it should not take space
+	hidden [PowerShell]$PowerShell # Actually where execution will take place
+	hidden [ThreadPool]$ThreadPool # The associated thread pool; `[ThreadPool].isValueType` is `False`
+
 	<##
-	 # Constructs a thread.
-	 #
-	 # **Required thread function signature**
-	 # 
-	 # ```powershell
-	 # function MyFunction([Thread]$Thread){
-	 # 	# Function body
-	 # }
-	 # ```
-	 #>
+# Constructs a thread.
+#
+# **Required thread function signature**
+# 
+# ```powershell
+# function MyFunction([Thread]$Thread){
+# 	# Function body
+# }
+# ```
+#>
 	Thread(
 		[ScriptBlock]$Function,
 		[String]$ProgressActivity,
@@ -496,22 +572,22 @@ class Thread : ThreadLike {
 	}
 
 	<##
-	 # Enqueues progress to the queue.
-	 #
-	 # ** Usage - Parameter example **
-	 #
-	 # ```powershell
-	 # @{
-	 # ProgressOperation = "Generic operation"
-	 # ProgressPercent   = 0
-	 # SecondsRemaining  = -1
-	 # ProgressStatus    = Processing
-	 # }`
-	 #
-	 # **Note**
-	 #
-	 # This was written, when classes did not support optional parameters in methods.
-	 #>
+# Enqueues progress to the queue.
+#
+# ** Usage - Parameter example **
+#
+# ```powershell
+# @{
+# ProgressOperation = "Generic operation"
+# ProgressPercent   = 0
+# SecondsRemaining  = -1
+# ProgressStatus    = Processing
+# }`
+#
+# **Note**
+#
+# This was written, when classes did not support optional parameters in methods.
+#>
 	[Void]EnqueueProgress([Hashtable]$ProgressInfo) {
 		$ProgressInfo.ThreadId = $this.ThreadId
 		$this.ThreadPool.ProgressQueue.Enqueue($ProgressInfo)
@@ -521,7 +597,7 @@ class Thread : ThreadLike {
 	[Void]RemoveThread() {
 		$this.PowerShell.Dispose()
 	}
-	
+
 	<## Begins the execution of the thread. #>
 	[Void]StartThread() {
 		# Start `ThreadLike`
@@ -548,24 +624,24 @@ class Thread : ThreadLike {
 }
 
 <##
- # Contains information about the thread pool, initializes the threads.
- #
- # The `ThreadId` on both the pool and children threads is of type `UInt16`, as extended from the `ThreadLike` class.
- # The `ProgressId` of the pool is calculated as `[UInt32]$this.ThreadId -shl $script:ThreadPoolProgressIdShift + [UInt32]$script:ThreadPoolProgressIdMaxThreads`, where `ThreadPoolProgressIdShift` is `16`, and `ThreadPoolProgressIdMaxThreads` is `[UInt16]::MaxValue`.
- # The `ProgressId` for the children threads is calculated the similar way, only instead of `ThreadPoolProgressIdMaxThreads` we are adding the index of the thread info array for the respecrive thread.
- # Thus there is 1 less possible threads per pool, than there are possible pools.
- #
- # **Note**
- #
- # For calculation of the ProgressId, the shift was chosen over multiplication on purspose, as this operation is to be faster __in principle__.
- #
- # ** Lifecycle **
- #
- # 1. New
- # 2. Start
- # 4. Wait
- # 5. Remove
- #>
+# Contains information about the thread pool, initializes the threads.
+#
+# The `ThreadId` on both the pool and children threads is of type `UInt16`, as extended from the `ThreadLike` class.
+# The `ProgressId` of the pool is calculated as `[UInt32]$this.ThreadId -shl $script:ThreadPoolProgressIdShift + [UInt32]$script:ThreadPoolProgressIdMaxThreads`, where `ThreadPoolProgressIdShift` is `16`, and `ThreadPoolProgressIdMaxThreads` is `[UInt16]::MaxValue`.
+# The `ProgressId` for the children threads is calculated the similar way, only instead of `ThreadPoolProgressIdMaxThreads` we are adding the index of the thread info array for the respecrive thread.
+# Thus there is 1 less possible threads per pool, than there are possible pools.
+#
+# **Note**
+#
+# For calculation of the ProgressId, the shift was chosen over multiplication on purspose, as this operation is to be faster __in principle__.
+#
+# ** Lifecycle **
+#
+# 1. New
+# 2. Start
+# 4. Wait
+# 5. Remove
+#>
 class ThreadPool : ThreadLike {
 	# Class properties
 	[Queue]$ProgressQueue # A queue to store progress reporting	
@@ -587,12 +663,12 @@ class ThreadPool : ThreadLike {
 	}
 
 	<##
-	 # Converts from ThreadId of the ThreadPool and ThreadId of the thread to thread's ProgressId.
-	 #
-	 # **Note**
-	 #
-	 # Not performing the check - `$ThreadThreadId -lt $script:ThreadProgressIdMaxThreadThreadId`, since if thread info array length reaches the `[UInt16]::MaxValue`, there would be an error thrown in the constructor.
-	 #>
+# Converts from ThreadId of the ThreadPool and ThreadId of the thread to thread's ProgressId.
+#
+# **Note**
+#
+# Not performing the check - `$ThreadThreadId -lt $script:ThreadProgressIdMaxThreadThreadId`, since if thread info array length reaches the `[UInt16]::MaxValue`, there would be an error thrown in the constructor.
+#>
 	[Int32] ConvertToThreadProgressId ([UInt16]$ThreadThreadId) {
 		# Set the absolute unsigned progress Id
 		[UInt32]$UnsignedProgressId = [UInt32]$this.ThreadId -shl $script:ThreadPoolProgressIdShift + [UInt32]$ThreadThreadId
@@ -630,7 +706,7 @@ class ThreadPool : ThreadLike {
 						}
 					}
 				}
-			
+
 				# Throw an error - only if there is absent or inappropriate or null Function, or non String/null Activity
 				throw "Improperly defined hashtable 'ThreadInfoArray' has been provided."
 			}
@@ -638,7 +714,7 @@ class ThreadPool : ThreadLike {
 
 		# Call superconstructor
 		$this.ThreadLike($ThreadId, $this.ConvertToThreadPoolProgressId(), $ProgressActivity)
-		
+
 
 		# Determine thread array length; Will throw an error if `$ThreadInfoArray.length` larger than `[UInt]::MaxValue`
 		[UInt16]$ThreadAmount = $ThreadInfoArray.Length
@@ -672,10 +748,10 @@ class ThreadPool : ThreadLike {
 	}
 
 	<##
-	 # Dequeues the progress queue, and updates the respective thread.
-	 #
-	 # Performs the check for consistency of the enqueued data, including the `ThreadId` set by the thread's method, since there are no private members, hence the queue could be accessed manually, and all checks are needed.
-	 #>
+# Dequeues the progress queue, and updates the respective thread.
+#
+# Performs the check for consistency of the enqueued data, including the `ThreadId` set by the thread's method, since there are no private members, hence the queue could be accessed manually, and all checks are needed.
+#>
 	[Void]DequeueProgress() {
 		# Dequeue
 		$hash = $this.ProgressQueue.Dequeue()
@@ -686,7 +762,7 @@ class ThreadPool : ThreadLike {
 			if ($hash.ThreadId -is [UInt16]) {
 				# If we write progress beyond managed range, then there will remain artifacts after finalizing
 				if ($hash.ThreadId -lt $this.ThreadArray.length) {
-					
+		
 					# Assign Thread for quick access; Class instances are passed by reference
 					$Progress = $this.ThreadArray[$hash.ThreadId]
 
@@ -707,7 +783,7 @@ class ThreadPool : ThreadLike {
 								}
 							}
 						}
-						
+			
 						# Display to user at least something, if no percentage reported, or 0 is reported
 						if ($Progress.ProgressPercentComplete -lt $script:ProgressPercentCompleteDefault) {
 							$Progress.ProgressPercentComplete = $script:ProgressPercentCompleteDefault
@@ -794,14 +870,14 @@ class ThreadPool : ThreadLike {
 		while (($this.ThreadArray | Select-Object -Property AsyncResult | Select-Object -Property IsCompleted) -notcontains "Completed") {
 			# Read from the queues
 			$this.ReadProgressQueue()
-			
+
 			# Update the progress
 			$this.UpdateAllProgress()
 
 			<#
-				Sleep - busy waiting is always a bad thing.
-				Let us wait a bit between iterations, so we can free up a core for thread executions.
-			#>
+	Sleep - busy waiting is always a bad thing.
+	Let us wait a bit between iterations, so we can free up a core for thread executions.
+#>
 			Start-Sleep -Milliseconds $this.SleepMilliseconds
 		}
 
