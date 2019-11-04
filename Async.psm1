@@ -495,38 +495,31 @@ class ThreadLike : Progress {
 	}
 }
 
-<##
- # Contains information about threads.
- #
- # **Lifecycle**
- #
- # 1. New
- # 3. Start
- # 4. Wait
- # 5. Remove
- #
- # **Note**
- #
- # Does not perform argument checks.
- #>
 class Thread : ThreadLike {
+	<#
+	.SYNOPSIS
+		Contains information about threads.
+
+	.DESCRIPTION
+		**Lifecycle**
+
+		1. New
+		2. [Main lifecycle]
+			1. Call `StartThread`
+			2. [...Call `UpdateThread`]
+			4. Call `WaitThread`
+		5. Call `RemoveThread
+
+	.NOTES
+		Does not perform argument checks.
+	#>
+
 	# Class properties
 	hidden [IAsyncResult]$AsyncResult # Holds async data for running thread
 	hidden [ScriptBlock]$Function # `[ScriptBlock].isValueType` is `False`, thus it is OK to store it here, and it should not take space
 	hidden [PowerShell]$PowerShell # Actually where execution will take place
 	hidden [ThreadPool]$ThreadPool # The associated thread pool; `[ThreadPool].isValueType` is `False`
 
-	<##
-# Constructs a thread.
-#
-# **Required thread function signature**
-# 
-# ```powershell
-# function MyFunction([Thread]$Thread){
-# 	# Function body
-# }
-# ```
-#>
 	Thread(
 		[ScriptBlock]$Function,
 		[String]$ProgressActivity,
@@ -535,6 +528,20 @@ class Thread : ThreadLike {
 		[UInt16]$ThreadId,
 		[ThreadPool]$ThreadPool
 	) {
+		<#
+			.SYNOPSIS
+				Constructs a thread.
+			
+			.NOTES
+				**Required thread function signature**
+				
+				```powershell
+				function MyFunction([Thread]$Thread){
+					# Function body
+				}
+				```
+		#>
+		
 		# Call superconstructor
 		$this.ThreadLike($ThreadId, $ProgressId, $ProgressActivity, $ProgressEnabled)
 
@@ -571,35 +578,45 @@ class Thread : ThreadLike {
 		)
 	}
 
-	<##
-# Enqueues progress to the queue.
-#
-# ** Usage - Parameter example **
-#
-# ```powershell
-# @{
-# ProgressOperation = "Generic operation"
-# ProgressPercent   = 0
-# SecondsRemaining  = -1
-# ProgressStatus    = Processing
-# }`
-#
-# **Note**
-#
-# This was written, when classes did not support optional parameters in methods.
-#>
 	[Void]EnqueueProgress([Hashtable]$ProgressInfo) {
+		<##
+			.SYNOPSIS
+				Enqueues progress to the queue.
+		
+			.EXAMPLE
+				**Parameter example**
+				
+				```powershell
+				@{
+				ProgressOperation = "Generic operation"
+				ProgressPercent   = 0
+				SecondsRemaining  = -1
+				ProgressStatus    = Processing
+				}`
+			
+			.NOTES
+				This was written, when classes did not support optional parameters in methods.
+		#>
+
 		$ProgressInfo.ThreadId = $this.ThreadId
 		$this.ThreadPool.ProgressQueue.Enqueue($ProgressInfo)
 	}
 
-	<## Cleans up. #>
 	[Void]RemoveThread() {
+		<#
+			.SYNOPSIS
+				Cleans up.
+		#>
+
 		$this.PowerShell.Dispose()
 	}
 
-	<## Begins the execution of the thread. #>
 	[Void]StartThread() {
+		<#
+			.SYNOPSIS
+				Begins the execution of the thread.
+		#>
+
 		# Start `ThreadLike`
 		$this.StartThreadLike()
 
@@ -607,14 +624,22 @@ class Thread : ThreadLike {
 		$this.AsyncResult = $this.PowerShell.BeginInvoke()
 	}
 
-	<## Updates the thread's state #>
 	[Void]UpdateThread() {
+		<#
+			.SYNOPSIS
+				Updates the thread's state.
+		#>
+
 		# Update ThreadLike
 		$this.UpdateThreadLike()
 	}
 
-	<## Waits for the operation to complete. #>
 	[Void]WaitThread() {
+		<#
+			.SYNOPSIS
+				Waits for the operation to complete.
+		#>
+
 		# End invocation
 		$this.PowerShell.EndInvoke($this.AsyncResult)
 
