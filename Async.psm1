@@ -468,6 +468,7 @@ class ThreadLike : Progress {
 				throw $script:ErrorThreadLikeForbiddenMethod
 			}
 		}
+	}
 
 		hidden [Void]UpdateProgressAsThreadLike() {
 			<#
@@ -480,7 +481,6 @@ class ThreadLike : Progress {
 				$this.UpdateProgress()
 			}
 		}
-	}
 
 	[Void]StartThreadLike() {
 		<#
