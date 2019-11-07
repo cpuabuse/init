@@ -416,6 +416,22 @@ class ThreadLike : Progress {
 		$this:ThreadLikeLifecycle = $script:LifecycleNew
 	}
 
+	[Void]StartThreadLike() {
+		<#
+				.SYNOPSIS
+					Starts the `ThreadLike`.
+			#>
+
+		# Switch by lifecycle state
+		if ($script:LifecycleNew -band $this.ProgressLifecycle -eq $this.ProgressLifecycle) {
+			# Update the Progress
+			$this.UpdateProgressAsThreadLike()
+		}
+		else {
+			throw $script:ErrorThreadLikeForbiddenMethod
+		}
+	}
+
 	[Void]StopThreadLike() {
 		<#
 				.SYNOPSIS
@@ -470,33 +486,19 @@ class ThreadLike : Progress {
 		}
 	}
 
-		hidden [Void]UpdateProgressAsThreadLike() {
-			<#
+	hidden [Void]UpdateProgressAsThreadLike() {
+		<#
 				.SYNOPSIS
 					A wrapper to perform the actual call to the update progress.
 			#>
 
-			# Update the Progress
-			if ($this.ProgressEnabled) {
-				$this.UpdateProgress()
-			}
-		}
-
-	[Void]StartThreadLike() {
-		<#
-				.SYNOPSIS
-					Starts the `ThreadLike`.
-			#>
-
-		# Switch by lifecycle state
-		if ($script:LifecycleNew -band $this.ProgressLifecycle -eq $this.ProgressLifecycle) {
-			# Update the Progress
-			$this.UpdateProgressAsThreadLike()
-		}
-		else {
-			throw $script:ErrorThreadLikeForbiddenMethod
+		# Update the Progress
+		if ($this.ProgressEnabled) {
+			$this.UpdateProgress()
 		}
 	}
+
+
 }
 
 class Thread : ThreadLike {
