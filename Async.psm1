@@ -31,6 +31,7 @@
 using namespace System # To access IAsyncResult
 using namespace System.Collections # To access Queue
 using namespace System.Management.Automation.Runspaces # To access InitialSessionState, RunspacePool
+using namespace System.Threading
 
 enum Lifecycle {
 	<#
@@ -72,7 +73,7 @@ if ($null -eq (Get-Variable -Name "AsyncVariableGuard" -Scope "Script" -ErrorAct
 	# Set the guard
 	New-Variable -Name "AsyncVariableGuard" -Scope "Script"
 
-	# Error messages
+	# Error messages and descriptions
 	[ValidateNotNullOrEmpty()][String]$script:ErrorProgressForbiddenMethod = "A method of 'Progress' class was invoked. That method is forbidden by current stage of object lifecycle."; `
 		Set-Variable -Name "ErrorProgressForbiddenMethod" `
 		-Description "Error text for lifecycle inconsistency." `
@@ -91,6 +92,11 @@ if ($null -eq (Get-Variable -Name "AsyncVariableGuard" -Scope "Script" -ErrorAct
 	[ValidateNotNullOrEmpty()][String]$script:ErrorThreadPoolTooManyThreads = "Too many threads to assign to the pool."; `
 		Set-Variable -Name "ErrorThreadPoolTooManyThreads" `
 		-Description "The requested amount of the threads cannnot be represented by the integer variable type." `
+		-Option "ReadOnly" `
+		-Scope "Script"
+	[ValidateNotNullOrEmpty()][String]$script:ThreadMutexDescription = "Thread Mutex for parallel access to public properties of 'Thread' class instance."; `
+		Set-Variable -Name "ThreadMutexDescription" `
+		-Description "Description of the Mutex in Thread class." `
 		-Option "ReadOnly" `
 		-Scope "Script"
 	
@@ -501,6 +507,10 @@ class ThreadLike : Progress {
 
 }
 
+class Handle { }
+
+class Function { }
+
 class Thread : ThreadLike {
 	<#
 	.SYNOPSIS
@@ -532,6 +542,9 @@ class Thread : ThreadLike {
 
 	# Lifecycle of the Thread
 	[Lifecycle]$ThreadLifecycle
+
+	# Thread lock for accessing public properties and functions utilizing them
+	[Mutex]$ThreadMutex
 
 	# Actually where execution will take place
 	hidden [PowerShell]$PowerShell
@@ -643,6 +656,12 @@ class Thread : ThreadLike {
 			}
 		)
 
+		# Create thread lock
+		$this.ThreadMutex = New-Object -TypeName "Mutex" -ArgumentList @(
+			$True,
+			$script:ThreadMutexDescription
+		)
+
 		# Explicitly setting lifecycle
 		$this.ThreadLifecycle = $script:LifecycleNew 
 	}
@@ -684,26 +703,28 @@ class Thread : ThreadLike {
 	}
 }
 
-<##
-# Contains information about the thread pool, initializes the threads.
-#
-# The `ThreadId` on both the pool and children threads is of type `UInt16`, as extended from the `ThreadLike` class.
-# The `ProgressId` of the pool is calculated as `[UInt32]$this.ThreadId -shl $script:ThreadPoolProgressIdShift + [UInt32]$script:ThreadPoolProgressIdMaxThreads`, where `ThreadPoolProgressIdShift` is `16`, and `ThreadPoolProgressIdMaxThreads` is `[UInt16]::MaxValue`.
-# The `ProgressId` for the children threads is calculated the similar way, only instead of `ThreadPoolProgressIdMaxThreads` we are adding the index of the thread info array for the respecrive thread.
-# Thus there is 1 less possible threads per pool, than there are possible pools.
-#
-# **Note**
-#
-# For calculation of the ProgressId, the shift was chosen over multiplication on purspose, as this operation is to be faster __in principle__.
-#
-# ** Lifecycle **
-#
-# 1. New
-# 2. Start
-# 4. Wait
-# 5. Remove
-#>
 class ThreadPool : ThreadLike {
+	<#
+		.SYNOPSIS
+			Contains information about the thread pool, initializes the threads.
+
+		.DESCRIPTION
+			The `ThreadId` on both the pool and children threads is of type `UInt16`, as extended from the `ThreadLike` class.
+			The `ProgressId` of the pool is calculated as `[UInt32]$this.ThreadId -shl $script:ThreadPoolProgressIdShift + [UInt32]$script:ThreadPoolProgressIdMaxThreads`, where `ThreadPoolProgressIdShift` is `16`, and `ThreadPoolProgressIdMaxThreads` is `[UInt16]::MaxValue`.
+			The `ProgressId` for the children threads is calculated the similar way, only instead of `ThreadPoolProgressIdMaxThreads` we are adding the index of the thread info array for the respecrive thread.
+			Thus there is 1 less possible threads per pool, than there are possible pools.
+
+			** Lifecycle **
+
+			1. New
+			2. Start
+			4. Wait
+			5. Remove
+
+		.NOTES
+			For calculation of the ProgressId, the shift was chosen over multiplication on purspose, as this operation is to be faster __in principle__.
+	#>
+
 	# Class properties
 	[Queue]$ProgressQueue # A queue to store progress reporting	
 	[UInt]$ReadProgressQueueMaxIterations = $script:ThreadPoolReadProgressQueueMaxIterations # Max iterations in `ReadQueue`
@@ -713,7 +734,7 @@ class ThreadPool : ThreadLike {
 
 
 	<## Converts from unsigned to signed progress Id. #>
-	[Int32] static ConvertToSignedProgressId ([UInt32]$UnsignedProgressId) {
+	[Int32] static hidden ConvertToSignedProgressId ([UInt32]$UnsignedProgressId) {
 		# Transform to Int32
 		if ($UnsignedProgressId -lt $script:ThreadPoolProgressIdUnsignedLimit) {
 			return [Int32]$UnsignedProgressId
@@ -745,67 +766,6 @@ class ThreadPool : ThreadLike {
 
 		# Return progress Id as signed
 		return [ThreadPool]::ConvertToSignedProgressId($UnsignedProgressId)
-	}
-
-	<## Constructor. #>
-	ThreadPool([UInt16]$ThreadId, [String]$ProgressActivity, [Hashtable[]]$ThreadInfoArray) {
-		# First things first - validate the array
-		{
-			# Validate the length - practically unnecessary check
-			if ($ThreadInfoArray.Length -ge $script:ThreadPoolProgressIdMaxThreads) {
-				throw $script:ErrorThreadPoolTooManyThreads
-			}
-
-			# Validate the hashtable data integrity
-			$ThreadInfoArray | ForEach-Object -Process {
-				if ($_.ContainsKey("Activity")) {
-					$_.Activity -is [String] {
-						if ($_.ContainsKey("Function")) {
-							if ($_.Function -is [ScriptBlock]) {
-								return
-							}
-						}
-					}
-				}
-
-				# Throw an error - only if there is absent or inappropriate or null Function, or non String/null Activity
-				throw "Improperly defined hashtable 'ThreadInfoArray' has been provided."
-			}
-		}
-
-		# Call superconstructor
-		$this.ThreadLike($ThreadId, $this.ConvertToThreadPoolProgressId(), $ProgressActivity)
-
-
-		# Determine thread array length; Will throw an error if `$ThreadInfoArray.length` larger than `[UInt]::MaxValue`
-		[UInt16]$ThreadAmount = $ThreadInfoArray.Length
-
-		# Initialize thread array
-		$this.ThreadArray = New-Object -TypeName "[Thread[]]" -ArgumentList @($ThreadAmount)
-
-		# Create synchronized progress queue
-		$this.ProgressQueue = [Queue]::Synchronized(
-			(New-Object -TypeName "System.Collections.Queue")
-		)
-
-		# Initialize & open pool
-		{
-			$this.RunspacePool = [RunspaceFactory]::CreateRunspacePool($script:ThreadPoolInitialSessionState <# Accessing script scope, since cannot use global scope vars directly from class methods. #>)
-			$this.RunspacePool.SetMinRunspaces($ThreadAmount)
-			$this.RunspacePool.SetMaxRunspaces($ThreadAmount)
-			$this.RunspacePool.Open()
-		}
-
-		# Populate threads
-		for ([UInt16]$i = $script:UZero16; $i -lt $ThreadAmount; $i++) {
-			$this.ThreadArray[$i] = New-Object -TypeName "Thread" -ArgumentList @(
-				$ThreadInfoArray[$i].Function,
-				$ThreadInfoArray[$i].Activity,
-				$this.ConvertToThreadProgressId($i),
-				$i,
-				$this
-			)
-		}
 	}
 
 	<##
@@ -871,6 +831,69 @@ class ThreadPool : ThreadLike {
 			}
 		}
 	}
+
+	<## Constructor. #>
+	ThreadPool([UInt16]$ThreadId, [String]$ProgressActivity, [Hashtable[]]$ThreadInfoArray) {
+		# First things first - validate the array
+		{
+			# Validate the length - practically unnecessary check
+			if ($ThreadInfoArray.Length -ge $script:ThreadPoolProgressIdMaxThreads) {
+				throw $script:ErrorThreadPoolTooManyThreads
+			}
+
+			# Validate the hashtable data integrity
+			$ThreadInfoArray | ForEach-Object -Process {
+				if ($_.ContainsKey("Activity")) {
+					$_.Activity -is [String] {
+						if ($_.ContainsKey("Function")) {
+							if ($_.Function -is [ScriptBlock]) {
+								return
+							}
+						}
+					}
+				}
+
+				# Throw an error - only if there is absent or inappropriate or null Function, or non String/null Activity
+				throw "Improperly defined hashtable 'ThreadInfoArray' has been provided."
+			}
+		}
+
+		# Call superconstructor
+		$this.ThreadLike($ThreadId, $this.ConvertToThreadPoolProgressId(), $ProgressActivity)
+
+
+		# Determine thread array length; Will throw an error if `$ThreadInfoArray.length` larger than `[UInt]::MaxValue`
+		[UInt16]$ThreadAmount = $ThreadInfoArray.Length
+
+		# Initialize thread array
+		$this.ThreadArray = New-Object -TypeName "[Thread[]]" -ArgumentList @($ThreadAmount)
+
+		# Create synchronized progress queue
+		$this.ProgressQueue = [Queue]::Synchronized(
+			(New-Object -TypeName "System.Collections.Queue")
+		)
+
+		# Initialize & open pool
+		{
+			$this.RunspacePool = [RunspaceFactory]::CreateRunspacePool($script:ThreadPoolInitialSessionState <# Accessing script scope, since cannot use global scope vars directly from class methods. #>)
+			$this.RunspacePool.SetMinRunspaces($ThreadAmount)
+			$this.RunspacePool.SetMaxRunspaces($ThreadAmount)
+			$this.RunspacePool.Open()
+		}
+
+		# Populate threads
+		for ([UInt16]$i = $script:UZero16; $i -lt $ThreadAmount; $i++) {
+			$this.ThreadArray[$i] = New-Object -TypeName "Thread" -ArgumentList @(
+				$ThreadInfoArray[$i].Function,
+				$ThreadInfoArray[$i].Activity,
+				$this.ConvertToThreadProgressId($i),
+				$i,
+				$this
+			)
+		}
+	}
+
+
 
 	<## Reads the queue and updates thread info, untill the queue is empty. ##>
 	[Void]ReadProgressQueue() {

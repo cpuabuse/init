@@ -12,29 +12,58 @@ class Lifecycle{
 	Remove
 }
 class Progress{
-	-Activity
-	-Completed
-	-Lifecycle
-	-ProgressId
-	#CurrentOperation
-	#PercentComplete
-	#SecondsRemaining
-	#Status
+	-String Activity
+	-Boolean Completed
+	-Int32 Id
+	#String CurrentOperation
+	#Lifecycle Lifecycle
+	#Int32 PercentComplete
+	#Int32 SecondsRemaining
+	#String Status
+	#Stop()
+	#Update()
 }
 class ThreadLike{
-	test
+	-Boolean ProgressEnabled
+	-UInt16 ThreadId
+	#Lifecycle Lifecycle
+	#Start()
+	#Stop()
+	#Update()
 }
 class Thread{
-	test
+	-IAsyncResult AsyncResult
+	-Function Function
+	-PowerShell PowerShell
+	-ThreadPool ThreadPool
+	+Mutex Lock
+	+Lifecycle Lifecycle
+	+Remove()
+	+Start()
+	+Update()
+	+Wait()
 }
 class ThreadPool{
-	test
+	-RunspacePool RunspacePool
+	-Thread[] ThreadArray
+	+Int32 SleepMilliseconds
+	-ConvertToSignedProgressId()
+	-ConvertToThreadProgressId()
+	-DequeueProgress()
+	-GetThreadPoolProgressId()
+	-ReadProgressQueue()
+	+Lifecycle Lifecycle
+	+RemoveAll()
+	+StartThreads()
+	+UpdateAllProgress()
+	+WaitThreads()
+	+Execute()
 }
 class Handle{
-	test
+	+EnqueueProgress()
 }
 class Function{
-	test
+	+ScriptBlock Scriptblock
 }
 
 Progress <|-- ThreadLike : extends
