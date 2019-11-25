@@ -25,7 +25,7 @@ class Progress{
 }
 class ThreadLike{
 	-Boolean ProgressEnabled
-	-UInt16 ThreadId
+	-UInt16 Id
 	#Lifecycle Lifecycle
 	#Start()
 	#Stop()
@@ -66,15 +66,15 @@ class Function{
 	+ScriptBlock Scriptblock
 }
 
-Progress <|-- ThreadLike : extends
-Progress <.. Lifecycle
-ThreadLike <|-- Thread : extends
-ThreadLike <|-- ThreadPool : extends
-ThreadLike <.. Lifecycle
-ThreadPool "1" *-- "1..*" Thread : contains
-ThreadPool <.. Lifecycle
-Thread "1" *-- Function : contains
-Thread "1" *-- "1" Handle : contains
-Thread <.. Lifecycle
-Function "1" o-- "1" Handle
+Function "1" --* "1" Thread : composes
+Handle "1" --o "1" Function : used by
+Handle "1" --* "1" Thread : composes
+Progress ..> Lifecycle : uses
+Thread ..> Lifecycle : uses
+Thread --|> ThreadLike : extends
+Thread "1..*" --* "1" ThreadPool : composes
+ThreadLike ..> Lifecycle : uses
+ThreadLike --|> Progress : extends
+ThreadPool ..> Lifecycle : uses
+ThreadPool --|> ThreadLike : extends
 ```
